@@ -15,7 +15,7 @@ NodeEngine HALO collector: one valid window
 nodes/<worker>/halo/telemetry -> cluster network manager
 ```
 
-The contract follows the thesis [local system model](<../../../../Dissertation/HALO/latex/قالب پایان نامه امیرکبیر/Latex template 2018/system-model.tex>) and the capacity, all-source counting, and queue sections of [local method-cluster.tex](<../../../../Dissertation/HALO/latex/قالب پایان نامه امیرکبیر/Latex template 2018/method-cluster.tex>).
+The contract follows the thesis [system model](latex-reference/system-model.tex) and the capacity, all-source counting, and queue sections of [method-cluster.tex](latex-reference/method-cluster.tex).
 
 | Input | Observation point | Consumer |
 |---|---|---|
@@ -68,11 +68,11 @@ At the destination, `arrivals` counts all arrivals and `processed` counts proces
 
 If the destination already has a complete counter, do not add sender-reported totals again. Starts and completions in a single window need not match because attempts cross window boundaries.
 
-Source accounting must satisfy:
+Source accounting uses authoritative whole-source `completed_succeeded` and `completed_failed`, including outcomes whose destination could not be attributed. It must satisfy:
 
 $$open_{end}=open_{start}+attempts_{started}-succeeded-failed.$$
 
-An outcome without a chosen destination still contributes to failed attempts in this identity, but not to a fictitious instance failure ratio. The wire contract carries it separately. An attempt awaiting a response stays open until its timeout or other terminal event; it is not failed early.
+Here `succeeded` and `failed` mean those whole-source totals, not the sum of a partial `outcomes[]` breakdown. An outcome without a chosen destination contributes to the failure total, but not to a fictitious instance failure ratio. The wire contract carries it separately. An attempt awaiting a response stays open until its timeout or other terminal event; it is not failed early.
 
 ## Outcomes and duration
 
@@ -106,7 +106,7 @@ Publish the window on `nodes/<worker>/halo/telemetry` using NodeEngine's existin
 
 Raw CPU and queue observations go only to the owning cluster network manager. The networking repository subsequently sends spare capacity after local reservation, plus overflow, to the root. Average cluster CPU or the general `15s` resource aggregate is not a substitute for that service-specific summary.
 
-The root normalizes spare capacity, and the source cluster uses its shares only for locally unserviceable demand. NodeEngine does not recalculate cost functions, derivatives, Lagrange multipliers, or root/local products. NetManager executes the final table at the edge.
+The receiver consumes this normalized telemetry contract. Its weight calculations and forwarding implementation are outside this repository. NodeEngine does not calculate cost functions, derivatives, Lagrange multipliers, or final routing weights.
 
 ## Reference inputs and required cases
 
@@ -123,3 +123,16 @@ For the thesis replay, use a `5s` window. Started counts in source order `A1,A2,
 These are hypothetical inputs. `B2` has only a source record. The consumer must obtain capacities `(100,60,100,100,60)` from these measurements; NodeEngine does not replace the measurements with those estimates. The final matrix and capacity checks are in the [network example](https://github.com/ECTLab/oakestra-net-load-balancing-project/blob/lb_develop/load-balancing-docs/algorithm.md).
 
 Measurements must remain meaningful with no traffic, changed CPU allocation, failed requests, pre-service rejection, cross-window attempts, and container removal. Without a real observation provider, only contract tests are possible; do not report a complete live HALO implementation.
+
+## Exact LaTeX references
+
+Section names below are English translations of the bundled headings. Labels are exact identifiers; source-line links identify the corresponding section in this snapshot. A parent section label is used where a subsection has no separate label. Wire formats, class paths, and startup adapters are repository-specific engineering choices.
+
+| Subject in this document | Exact bundled section | Source labels |
+|---|---|---|
+| Demand, capacity, and observed load | [Demand, capacity, and observed load](latex-reference/system-model.tex#L33) (system-model.tex:33) | `eq:source-demand` |
+| Ping, failures, and outstanding attempts | [Path, failure, and queue observations](latex-reference/system-model.tex#L53) (system-model.tex:53) | `eq:ping-mean`, `eq:failure-observation` |
+| Container CPU and processing inputs | [Linear capacity estimation from CPU consumption](latex-reference/method-cluster.tex#L8) (method-cluster.tex:8) | `eq:container-utilization`, `eq:processed-throughput`, `eq:cpu-linear-capacity` |
+| Processing from all senders | [Request counts from all sources](latex-reference/method-cluster.tex#L33) (method-cluster.tex:33) | `eq:all-source-observation` |
+| Optional destination queue observation | [Fixed path cost and container queue observation](latex-reference/method-cluster.tex#L92) (method-cluster.tex:92) | `eq:queue-measurement`, `eq:queue-residual` |
+| Producer replay fixture | [Inputs and calculation order](latex-reference/method-example.tex#L15) (method-example.tex:15) | `tab:example-input-hosts`, `tab:example-input-sources` |

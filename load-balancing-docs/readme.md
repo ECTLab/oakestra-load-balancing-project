@@ -8,15 +8,17 @@ These four documents specify this repository's HALO responsibilities: valid Node
 |---|---|
 | Repository | `oakestra-load-balancing-project` |
 | Inspected commit | `4081defa67d99f2467fead72aa75c245b1a7b6cc` |
-| Review date | `2026-11-24` |
+| Review date | `2026-11-25` |
 | Algorithm source | Thesis proposed-method chapter: base local cost and spare-capacity root method |
 | Delivery status | Documentation only; no HALO implementation or runtime test has been added |
 
-The primary source is [local chapter3.tex](<../../../../Dissertation/HALO/latex/قالب پایان نامه امیرکبیر/Latex template 2018/chapter3.tex>). Observation semantics come from [local system-model.tex](<../../../../Dissertation/HALO/latex/قالب پایان نامه امیرکبیر/Latex template 2018/system-model.tex>); capacity and queue definitions come from [local method-cluster.tex](<../../../../Dissertation/HALO/latex/قالب پایان نامه امیرکبیر/Latex template 2018/method-cluster.tex>).
+The primary source is [chapter3.tex](latex-reference/chapter3.tex). Observation semantics come from [system-model.tex](latex-reference/system-model.tex); capacity and queue definitions come from [method-cluster.tex](latex-reference/method-cluster.tex).
 
 ## Reading order
 
-Cross-project links use the two repositories' `lb_develop` branches so they also work on GitHub. Thesis links are local-only references into the sibling `Dissertation` workspace; neither repository contains those LaTeX files. Their equations and reference example are reproduced in the companion algorithm document, while opening a thesis-source link requires the original workspace layout.
+Cross-project links identify only the shared interface or the other repository's ownership. The latest LaTeX sources, required figures, matching PDF, and integrity manifest are now bundled in [latex-reference](latex-reference/README.txt). Source links stay inside this repository; a separate Dissertation checkout is no longer required. The reference tables use English translations of section headings, exact LaTeX labels, and source-line links.
+
+Reference entry points: [LaTeX master](latex-reference/AUTthesis.tex), [matching PDF](latex-reference/AUTthesis.pdf), and [source-integrity manifest](latex-reference/source-manifest.json).
 
 | Existing document | Purpose |
 |---|---|
@@ -57,4 +59,22 @@ The existing resource report has no exact request count, request outcome, or que
 
 ## File and change boundary
 
-Only these four existing documents are populated; no additional documentation file is needed. Proposed implementation paths are future work and have not been created. HALO telemetry uses a dedicated message over the existing MQTT connection, without making legacy resource models carry raw routing observations.
+The four existing English guides are retained, with the requested `latex-reference` snapshot added beside them. No HALO runtime implementation is created. Proposed paths remain future work. The dedicated telemetry message avoids requiring legacy resource models to carry routing observations.
+
+## Self-contained implementation boundary
+
+An implementer can write the collector, runtime snapshot extension, telemetry publisher, and deployment integration from these guides without reading the thesis. The low-level plan specifies provider input, normalized output, field validity, concrete message fixtures, and acceptance checks. It does not reproduce the companion repository's solver implementation.
+
+The actual application/gateway observation adapter and deployment addresses must still be supplied for the selected environment. The contract states exactly what that adapter must return; it does not pretend that the current code can count arbitrary encrypted application requests.
+
+## Exact LaTeX references
+
+Section names below are English translations of the bundled headings. Labels are exact identifiers; source-line links identify the corresponding section in this snapshot. A parent section label is used where a subsection has no separate label. Wire formats, class paths, and startup adapters are repository-specific engineering choices.
+
+| Subject in this document | Exact bundled section | Source labels |
+|---|---|---|
+| Source/container ownership and required observations | [Components, services, and data boundaries](latex-reference/system-model.tex#L19) (system-model.tex:19) | `sec:system-model` |
+| Source/container ownership and required observations | [Demand, capacity, and observed load](latex-reference/system-model.tex#L33) (system-model.tex:33) | `eq:source-demand` |
+| CPU allocation and linear-capacity inputs | [Linear capacity estimation from CPU consumption](latex-reference/method-cluster.tex#L8) (method-cluster.tex:8) | `eq:container-utilization`, `eq:cpu-linear-capacity` |
+| Destination counting and queue inputs | [Request counts from all sources](latex-reference/method-cluster.tex#L33) (method-cluster.tex:33) | `eq:all-source-observation` |
+| Destination counting and queue inputs | [Fixed path cost and container queue observation](latex-reference/method-cluster.tex#L92) (method-cluster.tex:92) | `eq:queue-measurement` |

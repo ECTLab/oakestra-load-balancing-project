@@ -134,14 +134,16 @@ Epoch is an opaque identity, not a lexically sortable timestamp. Receivers must 
 |---|---|
 | `service_key`, `source_key` | Full service name and logical source identity |
 | `attempts_started`, `open_start`, `open_end` | Demand and open-attempt counts at both boundaries |
+| `completed_succeeded`, `completed_failed` | Authoritative totals of every completed attempt, including outcomes with unknown route attribution |
+| `duration_sum_seconds`, `duration_count` | Whole-source completed-duration aggregate; optional path aggregates do not replace it |
 | `unrouted_failed` | Failed completion without a known destination; whole-source accounting only |
 | `outcomes[]` | Known-destination outcome groups |
 | Outcome: `cluster_id`, `instance_number`, `host_id`, `deployment_revision` | Actual destination and deployment identity |
 | Outcome: `succeeded`, `failed` | Successful and failed completions |
 | Outcome: `duration_sum_seconds`, `duration_count` | Duration sum and count for the corresponding completed cohort |
-| `validity`, `missing_reason` | Measurement validity/absence; outcome-definition revision is recorded in provider configuration |
+| `validity`, `missing_reason` | Measurement groups: `requests`, `path_outcomes`, and `durations`; outcome-definition revision is recorded in provider configuration |
 
-Source accounting sums successes/failures over all `outcomes` and includes `unrouted_failed`. An unrouted failure does not enter a known path's mean. If its duration is needed for monitoring, define a separate field rather than assigning it to a fake instance.
+Source accounting uses `completed_succeeded` and `completed_failed`, not a possibly incomplete path breakdown. `unrouted_failed` is a subset of the failure total and is not added again. Whole-source duration aggregates include terminal attempts independently of route attribution; unknown routes are not assigned to fake instances.
 
 | Destination field | Meaning |
 |---|---|
@@ -163,33 +165,182 @@ The following hypothetical message illustrates source-only edge `B2`. Identifier
   "producer_id": "worker-b2",
   "producer_epoch": "boot-example-1",
   "sequence": 10,
-  "window_start": "2026-11-24T09:00:00Z",
-  "window_end": "2026-11-24T09:00:05Z",
+  "window_start": "2026-11-25T09:00:00Z",
+  "window_end": "2026-11-25T09:00:05Z",
   "duration_seconds": 5,
-  "source_metrics": [{
-    "service_key": "campus.default.parking.default",
-    "source_key": "worker-b2",
-    "attempts_started": 120,
-    "open_start": 0,
-    "open_end": 0,
-    "unrouted_failed": 0,
-    "validity": {"requests": "valid"},
-    "outcomes": [{
-      "cluster_id": "cluster-b",
-      "instance_number": 3,
-      "host_id": "worker-b1",
-      "deployment_revision": "deployment-b1-1",
-      "succeeded": 120,
-      "failed": 0,
+  "source_metrics": [
+    {
+      "service_key": "campus.default.parking.default",
+      "source_key": "worker-b2",
+      "attempts_started": 120,
+      "open_start": 0,
+      "open_end": 0,
+      "completed_succeeded": 120,
+      "completed_failed": 0,
+      "unrouted_failed": 0,
       "duration_sum_seconds": 2.4,
-      "duration_count": 120
-    }]
-  }],
+      "duration_count": 120,
+      "validity": {
+        "requests": "valid",
+        "path_outcomes": "valid",
+        "durations": "valid"
+      },
+      "outcomes": [
+        {
+          "cluster_id": "cluster-b",
+          "instance_number": 3,
+          "host_id": "worker-b1",
+          "deployment_revision": "deployment-b1-1",
+          "succeeded": 120,
+          "failed": 0,
+          "duration_sum_seconds": 2.4,
+          "duration_count": 120
+        }
+      ]
+    }
+  ],
   "destination_metrics": []
 }
 ```
 
 The consumer obtains demand `24` from `120/5`; `B2` remains a source, not a processing destination. The duration value only illustrates the contract and adds no new term to the base objective.
+
+## Component call contracts
+
+These are proposed public boundaries for this repository. They do not move a network solver into NodeEngine.
+
+| Component call | Required input | Output |
+|---|---|---|
+| Runtime capability `ReadHALOSnapshot` | Current runtime/container inventory | Cumulative CPU seconds, effective cores, instance/deployment/allocation identities, and per-field validity. No rates or weights. |
+| Public runtime-manager wrapper | Runtime type and target instances | The model-level snapshot, or explicit unsupported/error result; callers outside `virtualization/internal` do not import private runtime packages. |
+| Provider `ReadWindow` | Actual start/end boundaries and configured service/source/instance bindings | A normalized request window with source totals, optional route breakdown, destination processing counts, and optional queues. It contains deltas, not an ambiguous mixture of counters and deltas. |
+| Collector window close | Matching CPU boundary snapshots plus provider window | `HALOTelemetryWindow`: identity envelope, two role arrays, and validity groups. No capacity estimate, safety margin, or routing table. |
+| MQTT `ReportHALOTelemetry` | One complete telemetry window | Publication outcome using the existing client and `halo/telemetry` suffix. A timeout is not reported as successful delivery. |
+| Collector stop | Daemon cancellation | Stop timers/provider reads, release local state, and avoid new publication. It does not stop unrelated deployment services. |
+
+The provider adapter may internally read cumulative counters or an event stream, but must normalize them before returning `ReadWindow`. Its cut must match the requested window. If exact matching is unavailable, mark the affected measurement invalid/unavailable; do not silently combine different durations.
+
+A whole-source total is authoritative even when route attribution fails. Enforce `open_end = open_start + attempts_started - completed_succeeded - completed_failed`. Known-route successes/failures may be a subset of those totals. `unrouted_failed` is already included in `completed_failed`.
+
+With complete route coverage, `sum(outcome.succeeded) = completed_succeeded` and `sum(outcome.failed) + unrouted_failed = completed_failed`. Otherwise, the nonnegative differences are unattributed outcomes. Mark `path_outcomes` unavailable/invalid so the consumer does not derive a biased fresh path-failure ratio. Do not lose valid source demand because route attribution is missing.
+
+For valid complete source-duration coverage, `duration_count = completed_succeeded + completed_failed`. This supports a source mean even when destination attribution is missing. A zero count gives no new mean. Partial or missing duration coverage must not be labeled a complete measured mean.
+
+### Whole-container CPU fixture
+
+For one valid `5s` window, suppose the container CPU counter moves from `100` to `109` core-seconds and its verified allocation remains `2` cores. The CPU delta is `9`, not `109`, and not a percentage of the host. The following destination-only wire message illustrates the normalized result.
+
+```json
+{
+  "schema_version": 1,
+  "producer_id": "worker-a1",
+  "producer_epoch": "boot-example-a1",
+  "sequence": 10,
+  "window_start": "2026-11-25T09:00:00Z",
+  "window_end": "2026-11-25T09:00:05Z",
+  "duration_seconds": 5,
+  "source_metrics": [],
+  "destination_metrics": [
+    {
+      "service_key": "campus.default.parking.default",
+      "instance_number": 1,
+      "host_id": "worker-a1",
+      "deployment_revision": "deployment-a1-1",
+      "cpu_allocation_revision": "cpu-a1-1",
+      "cpu_allocated_cores": 2,
+      "cpu_used_core_seconds": 9,
+      "arrivals": 455,
+      "processed": 450,
+      "service_starts": 452,
+      "queue_wait_sum_seconds": 9.04,
+      "queue_waiting_end": 5,
+      "in_service_end": 2,
+      "ready": true,
+      "validity": {
+        "cpu": "valid",
+        "processing": "valid",
+        "queue": "valid",
+        "readiness": "valid"
+      }
+    }
+  ]
+}
+```
+
+The CPU and completion values reproduce the thesis input for `A1`. Arrival and queue values here are illustrative provider data, not additional thesis measurements. The collector publishes raw window inputs; it does not publish the derived capacity.
+
+### Validation and lifecycle decisions
+
+| Condition | Required producer behavior |
+|---|---|
+| Known observed service has no traffic | Emit its explicit zero-count record. Empty role arrays mean the role is absent, not that every omitted service has zero demand. |
+| Observation provider missing or failing | Keep identity and report unavailable measurements with reasons. Do not manufacture request/processing counts from flows. |
+| CPU input valid but request processing unavailable | Publish their separate validity; the consumer cannot estimate new capacity from CPU alone. |
+| Queue unavailable | Null/omit the affected optional values with unavailable status; do not set measured zeros. |
+| Container/allocation revision changes mid-window | Invalidate that instance's mixed window and establish a new baseline. Other instances may still have valid records. |
+| Observation definition changes | Reset incompatible measurement baselines, version the provider configuration, and invalidate incompatible cached observations before normal publication. |
+| MQTT not connected yet | Do not dereference an uninitialized client. Keep bounded pending state or explicitly record a failed publication. |
+| Retrying a window | Reuse the same producer/epoch/sequence and body; do not assign a new identity to the same delta. |
+| Provider snapshot gives only a PID CPU percentage | Do not label it a whole-container core-second delta. |
+
+Use validity values `valid`, `unavailable`, `invalid`, and `unsupported`. Source groups include `requests`, `path_outcomes`, and `durations`; destination groups include `cpu`, `processing`, `queue`, and `readiness`. Counts are integers, not booleans; durations and CPU/rate values must be finite. Reject JSON NaN/Infinity.
+
+On restart, registration/reconnect must identify the active producer epoch to the telemetry receiver and retire the old one. Sequence numbers alone do not order different opaque epochs. This startup adapter is part of telemetry delivery; it is not implemented by merely adding a new struct.
+
+For concurrent container deployment, allocation bookkeeping must include pending as well as running reservations. Reserve atomically, release on failed deployment/removal, and reconstruct from verified runtime state after restart. This is resource-allocation bookkeeping, not the removed cross-service background term in the HALO cost function.
+
+### Incomplete route-attribution fixture
+
+Three attempts start and complete: two succeed and one fails before destination selection. Only one successful attempt has a known destination. The source totals and mean remain valid, but fresh per-path failure estimation is unavailable.
+
+```json
+{
+  "schema_version": 1,
+  "producer_id": "worker-a1",
+  "producer_epoch": "boot-example-a1",
+  "sequence": 11,
+  "window_start": "2026-11-25T09:00:05Z",
+  "window_end": "2026-11-25T09:00:10Z",
+  "duration_seconds": 5,
+  "source_metrics": [
+    {
+      "service_key": "campus.default.parking.default",
+      "source_key": "worker-a1",
+      "attempts_started": 3,
+      "open_start": 0,
+      "open_end": 0,
+      "completed_succeeded": 2,
+      "completed_failed": 1,
+      "unrouted_failed": 1,
+      "duration_sum_seconds": 0.12,
+      "duration_count": 3,
+      "validity": {
+        "requests": "valid",
+        "path_outcomes": "unavailable",
+        "durations": "valid"
+      },
+      "missing_reason": {
+        "path_outcomes": "One completed successful attempt has no confirmed destination identity."
+      },
+      "outcomes": [
+        {
+          "cluster_id": "cluster-b",
+          "instance_number": 3,
+          "host_id": "worker-b1",
+          "deployment_revision": "deployment-b1-1",
+          "succeeded": 1,
+          "failed": 0,
+          "duration_sum_seconds": 0.04,
+          "duration_count": 1
+        }
+      ]
+    }
+  ],
+  "destination_metrics": []
+}
+```
+
+The demand is `3/5` attempts/s, the complete source-duration mean is `0.12/3` seconds, and outstanding accounting is `0 + 3 - 2 - 1 = 0`. Summing only the known-route outcome would incorrectly leave two attempts open.
 
 ## Why core manager models need no mandatory extension
 
@@ -235,7 +386,7 @@ Build NodeEngine from this repository and NetManager from its companion. This re
 
 The [root](../scripts/StartOakestraRoot.sh) and [cluster](../scripts/StartOakestraCluster.sh) startup scripts may download official configuration/images. Keep checkout and override selection explicit: selecting this repository's branch does not install the sibling networking checkout automatically.
 
-During implementation, update [SKILLS/troubleshoot-oakestra.md](../SKILLS/troubleshoot-oakestra.md) for new configuration, binary behavior, and the topic. For this requested delivery, only the four documents in this directory change.
+During implementation, update [SKILLS/troubleshoot-oakestra.md](../SKILLS/troubleshoot-oakestra.md) for new configuration, binary behavior, and the topic. This documentation revision changes the four guides and adds the requested LaTeX reference snapshot; runtime code remains unchanged.
 
 ## Future acceptance tests
 
@@ -249,6 +400,7 @@ During implementation, update [SKILLS/troubleshoot-oakestra.md](../SKILLS/troubl
 | All senders | Count local and foreign processing once at the destination |
 | Open attempts | Starts, outcomes, and outstanding counts reconcile across boundaries |
 | Failure/retry | One timeout completion, no second late-response completion, independent retry attempts |
+| Partial route attribution | Complete source totals reconcile; unknown destinations do not create biased path ratios or false open attempts. |
 | Pre-service rejection | Count the appropriate arrival/failure but not nonexistent processing |
 | Queue | Waiting separate from in-service; enqueue-to-start duration; missing instrumentation marked unavailable |
 | Zero CPU/processing | Report genuine zeros without creating capacity through division by zero |
@@ -261,3 +413,16 @@ During implementation, update [SKILLS/troubleshoot-oakestra.md](../SKILLS/troubl
 A two-repository integration test must show that this telemetry reaches the network manager and that the network manager, not NodeEngine, computes capacity and weights. Synthetic observations test a contract; they do not establish a functioning real request provider.
 
 Report flow shares separately from request shares. A persistent connection may send many requests to one destination; collecting exact request counts alone does not fix that datapath limitation. Request-layer prerequisites are in the [network readme](https://github.com/ECTLab/oakestra-net-load-balancing-project/blob/lb_develop/load-balancing-docs/readme.md).
+
+## Exact LaTeX references
+
+Section names below are English translations of the bundled headings. Labels are exact identifiers; source-line links identify the corresponding section in this snapshot. A parent section label is used where a subsection has no separate label. Wire formats, class paths, and startup adapters are repository-specific engineering choices.
+
+| Subject in this document | Exact bundled section | Source labels |
+|---|---|---|
+| Window and source-demand contract | [Demand, capacity, and observed load](latex-reference/system-model.tex#L33) (system-model.tex:33) | `eq:source-demand` |
+| Failure and duration semantics | [Path, failure, and queue observations](latex-reference/system-model.tex#L53) (system-model.tex:53) | `eq:failure-observation` |
+| Effective CPU allocation and usage | [Linear capacity estimation from CPU consumption](latex-reference/method-cluster.tex#L8) (method-cluster.tex:8) | `eq:container-utilization`, `eq:cpu-linear-capacity` |
+| Destination totals | [Request counts from all sources](latex-reference/method-cluster.tex#L33) (method-cluster.tex:33) | `eq:all-source-observation` |
+| Queue-start cohort | [Fixed path cost and container queue observation](latex-reference/method-cluster.tex#L92) (method-cluster.tex:92) | `eq:queue-measurement` |
+| Telemetry fixture | [Inputs and calculation order](latex-reference/method-example.tex#L15) (method-example.tex:15) | `tab:example-input-hosts`, `tab:example-input-sources` |

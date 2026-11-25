@@ -97,3 +97,15 @@ If the observation provider fails, mark the affected measurements unavailable wi
 5. Deploy matching images/binaries and test direct user entry separately from the request-versus-flow limitation.
 
 The [low-level plan](skeleton-implementation-low-level.md) lists exact changes and acceptance criteria. These are future steps, not reported runtime results.
+
+## Exact LaTeX references
+
+Section names below are English translations of the bundled headings. Labels are exact identifiers; source-line links identify the corresponding section in this snapshot. A parent section label is used where a subsection has no separate label. Wire formats, class paths, and startup adapters are repository-specific engineering choices.
+
+| Subject in this document | Exact bundled section | Source labels |
+|---|---|---|
+| Data ownership and allocated resources | [Components, services, and data boundaries](latex-reference/system-model.tex#L19) (system-model.tex:19) | `sec:system-model` |
+| Observation window and normalized CPU | [Demand, capacity, and observed load](latex-reference/system-model.tex#L33) (system-model.tex:33) | `eq:source-demand` |
+| Capacity-estimation input requirements | [Linear capacity estimation from CPU consumption](latex-reference/method-cluster.tex#L8) (method-cluster.tex:8) | `eq:cpu-linear-capacity` |
+| Request counts and optional queues | [Request counts from all sources](latex-reference/method-cluster.tex#L33) (method-cluster.tex:33) | `eq:all-source-observation` |
+| Request counts and optional queues | [Fixed path cost and container queue observation](latex-reference/method-cluster.tex#L92) (method-cluster.tex:92) | `eq:queue-measurement` |
